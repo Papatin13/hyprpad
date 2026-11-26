@@ -2,6 +2,8 @@
 
 A macOS Launchpad-style application launcher written in Rust for **Hyprland** (Wayland), built with `gtk4` and `gtk4-layer-shell`.
 
+![hyperpad screenshot](assets/screenshot.png)
+
 ## Features
 
 - **Fullscreen Layer-Shell Overlay**: Covers the entire screen (including status bars) with exclusive keyboard focus and frosted-glass blur.
