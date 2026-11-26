@@ -38,6 +38,7 @@ pub struct Strings {
     pub spacing: &'static str,
     pub reset_defaults: &'static str,
     pub config_hint: &'static str,
+    pub auto_steam_folder: &'static str,
     lang: Lang,
 }
 
@@ -61,6 +62,7 @@ impl Strings {
                 spacing: "Abstand",
                 reset_defaults: "Standard wiederherstellen",
                 config_hint: "Konfig: ~/.config/hyperpad/config.conf",
+                auto_steam_folder: "Steam-Spiele in Ordner sammeln",
                 lang: Lang::De,
             },
             Lang::En => Self {
@@ -80,6 +82,7 @@ impl Strings {
                 spacing: "Spacing",
                 reset_defaults: "Reset to defaults",
                 config_hint: "Config: ~/.config/hyperpad/config.conf",
+                auto_steam_folder: "Group Steam games in folder",
                 lang: Lang::En,
             },
         }

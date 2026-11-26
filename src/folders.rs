@@ -148,6 +148,34 @@ impl FolderStore {
         self.save();
     }
 
+    /// Collect all unassigned Steam game IDs into the dedicated "Steam" folder.
+    pub fn sync_steam_folder(&mut self, steam_app_ids: &[String]) {
+        if steam_app_ids.is_empty() {
+            return;
+        }
+        let assigned = self.assigned_app_ids();
+        let to_add: Vec<String> = steam_app_ids
+            .iter()
+            .filter(|id| !assigned.contains(*id))
+            .cloned()
+            .collect();
+
+        if to_add.is_empty() {
+            return;
+        }
+
+        if let Some(folder) = self.folders.iter_mut().find(|f| f.id == "auto-steam") {
+            folder.app_ids.extend(to_add);
+        } else {
+            self.folders.push(Folder {
+                id: "auto-steam".to_string(),
+                name: "Steam".to_string(),
+                app_ids: to_add,
+            });
+        }
+        self.save();
+    }
+
     fn remove_app_internal(&mut self, app_id: &str) {
         for f in &mut self.folders {
             f.app_ids.retain(|id| id != app_id);

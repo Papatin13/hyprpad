@@ -10,7 +10,7 @@ use gtk4::{
     Align, Application, ApplicationWindow, Box as GtkBox, Button, CenterBox, CssProvider,
     DragSource, DropTarget, Entry, EventControllerKey, EventControllerScroll,
     EventControllerScrollFlags, GestureClick, Grid, Image, Label, Orientation, Overlay, PickFlags,
-    Popover, PropagationPhase, Scale, Stack, StackTransitionType, WidgetPaintable,
+    Popover, PropagationPhase, Scale, Stack, StackTransitionType, Switch, WidgetPaintable,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
@@ -72,8 +72,16 @@ pub fn build_ui(app: &Application) {
     window.set_anchor(Edge::Right, true);
 
     let history = AppHistory::load();
-    let folders = FolderStore::load();
+    let mut folders = FolderStore::load();
     let all_apps = AppEntry::load_all(&history);
+    if config.auto_steam_folder {
+        let steam_ids: Vec<String> = all_apps
+            .iter()
+            .filter(|a| a.is_steam_game)
+            .map(|a| a.id.clone())
+            .collect();
+        folders.sync_steam_folder(&steam_ids);
+    }
 
     // Root vertical layout
     let root_box = GtkBox::builder()
@@ -1365,6 +1373,51 @@ fn show_settings_popover(state: &Rc<LauncherState>, parent: &Button) {
     }
     root.append(&sp_row);
 
+    // 6. Auto Steam folder switch
+    let steam_row = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(12)
+        .hexpand(true)
+        .margin_top(4)
+        .margin_bottom(4)
+        .build();
+    let steam_lbl = Label::builder()
+        .label(state.strings.auto_steam_folder)
+        .halign(Align::Start)
+        .hexpand(true)
+        .build();
+    steam_lbl.add_css_class("settings-label");
+    let steam_switch = Switch::builder()
+        .active(cfg.auto_steam_folder)
+        .valign(Align::Center)
+        .build();
+    {
+        let state_c = Rc::clone(state);
+        steam_switch.connect_state_set(move |_, active| {
+            {
+                let mut c = state_c.config.borrow_mut();
+                c.auto_steam_folder = active;
+                c.save();
+            }
+            if active {
+                let steam_ids: Vec<String> = state_c
+                    .all_apps
+                    .iter()
+                    .filter(|a| a.is_steam_game)
+                    .map(|a| a.id.clone())
+                    .collect();
+                state_c.folders.borrow_mut().sync_steam_folder(&steam_ids);
+            } else {
+                state_c.folders.borrow_mut().dissolve_folder("auto-steam");
+            }
+            refresh_grid(&state_c);
+            glib::Propagation::Proceed
+        });
+    }
+    steam_row.append(&steam_lbl);
+    steam_row.append(&steam_switch);
+    root.append(&steam_row);
+
     // Reset button & config path hint
     let reset_btn = Button::with_label(state.strings.reset_defaults);
     reset_btn.add_css_class("settings-reset-btn");
@@ -1375,6 +1428,7 @@ fn show_settings_popover(state: &Rc<LauncherState>, parent: &Button) {
         let co_s = cols_scale.clone();
         let ro_s = rows_scale.clone();
         let sp_s = sp_scale.clone();
+        let st_sw = steam_switch.clone();
         reset_btn.connect_clicked(move |_| {
             let def = Config::default();
             {
@@ -1388,6 +1442,7 @@ fn show_settings_popover(state: &Rc<LauncherState>, parent: &Button) {
             co_s.set_value(def.columns as f64);
             ro_s.set_value(def.rows as f64);
             sp_s.set_value(def.spacing as f64);
+            st_sw.set_active(def.auto_steam_folder);
             refresh_grid(&state_c);
         });
     }

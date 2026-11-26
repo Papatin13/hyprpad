@@ -13,6 +13,7 @@ pub struct AppEntry {
     pub description: String,
     pub icon: Option<gio::Icon>,
     pub info: gio::AppInfo,
+    pub is_steam_game: bool,
 }
 
 impl AppEntry {
@@ -32,12 +33,17 @@ impl AppEntry {
                     .map(|d| d.to_string())
                     .unwrap_or_default();
                 let icon = app.icon();
+                let is_steam_game = app
+                    .commandline()
+                    .map(|c| c.to_string_lossy().contains("steam://rungameid/"))
+                    .unwrap_or(false);
                 AppEntry {
                     id,
                     name,
                     description,
                     icon,
                     info: app,
+                    is_steam_game,
                 }
             })
             .collect();

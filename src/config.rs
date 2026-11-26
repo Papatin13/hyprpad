@@ -8,6 +8,7 @@ pub struct Config {
     pub icon_size: i32,
     pub spacing: i32,
     pub background_opacity: f64,
+    pub auto_steam_folder: bool,
 }
 
 impl Default for Config {
@@ -18,6 +19,7 @@ impl Default for Config {
             icon_size: 72,
             spacing: 16,
             background_opacity: 0.25,
+            auto_steam_folder: false,
         }
     }
 }
@@ -88,6 +90,11 @@ impl Config {
                         cfg.background_opacity = v.clamp(0.0, 0.95);
                     }
                 }
+                "auto_steam_folder" => {
+                    if let Ok(v) = val.parse::<bool>() {
+                        cfg.auto_steam_folder = v;
+                    }
+                }
                 _ => {}
             }
         }
@@ -102,14 +109,20 @@ impl Config {
             let _ = fs::create_dir_all(parent);
         }
         let content = format!(
-            "# launchpad-rs Konfiguration\n\
-             # Änderungen werden beim nächsten Öffnen (oder direkt über das Zahnrad-Menü) übernommen.\n\n\
+            "# hyperpad configuration\n\
+             # Changes take effect on next launch (or immediately via the gear menu).\n\n\
              columns = {}\n\
              rows = {}\n\
              icon_size = {}\n\
              spacing = {}\n\
-             background_opacity = {:.2}\n",
-            self.columns, self.rows, self.icon_size, self.spacing, self.background_opacity
+             background_opacity = {:.2}\n\
+             auto_steam_folder = {}\n",
+            self.columns,
+            self.rows,
+            self.icon_size,
+            self.spacing,
+            self.background_opacity,
+            self.auto_steam_folder
         );
         let _ = fs::write(&path, content);
     }
