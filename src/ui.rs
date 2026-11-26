@@ -26,6 +26,16 @@ enum GridItem {
     Folder(Folder),
 }
 
+#[derive(Clone, Copy)]
+struct LayoutMetrics {
+    scale: f64,
+    icon_size: i32,
+    tile_size: i32,
+    spacing: i32,
+    cols: usize,
+    apps_per_page: usize,
+}
+
 struct LauncherState {
     all_apps: Vec<AppEntry>,
     display_items: RefCell<Vec<GridItem>>,
@@ -34,6 +44,7 @@ struct LauncherState {
     config: RefCell<Config>,
     strings: Strings,
     dynamic_css: CssProvider,
+    monitor_size: Cell<(i32, i32)>,
     current_page: Cell<usize>,
     total_pages: Cell<usize>,
     selected_index: Cell<usize>,
@@ -41,6 +52,7 @@ struct LauncherState {
     dot_buttons: RefCell<Vec<Button>>,
     last_scroll: RefCell<Instant>,
     open_folder_id: RefCell<Option<String>>,
+    root_box: GtkBox,
     stack: Stack,
     dots_box: GtkBox,
     search_entry: Entry,
@@ -48,10 +60,54 @@ struct LauncherState {
     window: ApplicationWindow,
 }
 
+fn initial_monitor_size() -> (i32, i32) {
+    if let Some(display) = gdk::Display::default() {
+        let monitors = display.monitors();
+        if let Some(obj) = monitors.item(0) {
+            if let Ok(mon) = obj.downcast::<gdk::Monitor>() {
+                let geo = mon.geometry();
+                if geo.width() > 0 && geo.height() > 0 {
+                    return (geo.width(), geo.height());
+                }
+            }
+        }
+    }
+    (1920, 1080)
+}
+
+fn compute_layout_for(cfg: &Config, (mw, mh): (i32, i32)) -> LayoutMetrics {
+    let scale = if cfg.auto_scale {
+        let screen_scale = (mw as f64 / 1920.0).min(mh as f64 / 1080.0);
+        let base_tile = (cfg.icon_size + 54) as f64;
+        let cols = cfg.columns as f64;
+        let rows = cfg.rows as f64;
+        let sp = cfg.spacing as f64;
+
+        let fit_w = (mw as f64 * 0.88) / (cols * base_tile + (cols - 1.0) * sp);
+        let fit_h = (mh as f64 * 0.76) / (rows * base_tile + (rows - 1.0) * sp);
+        let fit_scale = fit_w.min(fit_h);
+
+        screen_scale.clamp(0.55, 1.65).min(fit_scale).max(0.45)
+    } else {
+        1.0
+    };
+
+    LayoutMetrics {
+        scale,
+        icon_size: ((cfg.icon_size as f64) * scale).round() as i32,
+        tile_size: (((cfg.icon_size + 54) as f64) * scale).round() as i32,
+        spacing: ((cfg.spacing as f64) * scale).round().max(4.0) as i32,
+        cols: cfg.columns,
+        apps_per_page: cfg.apps_per_page(),
+    }
+}
+
 pub fn build_ui(app: &Application) {
     let strings = Strings::from_system();
     let config = Config::load();
-    let dynamic_css = load_css(&config);
+    let mon_size = initial_monitor_size();
+    let initial_layout = compute_layout_for(&config, mon_size);
+    let dynamic_css = load_css(&config, &initial_layout);
 
     let window = ApplicationWindow::builder()
         .application(app)
@@ -180,6 +236,7 @@ pub fn build_ui(app: &Application) {
         config: RefCell::new(config),
         strings,
         dynamic_css,
+        monitor_size: Cell::new(mon_size),
         current_page: Cell::new(0),
         total_pages: Cell::new(1),
         selected_index: Cell::new(0),
@@ -187,6 +244,7 @@ pub fn build_ui(app: &Application) {
         dot_buttons: RefCell::new(Vec::new()),
         last_scroll: RefCell::new(Instant::now() - Duration::from_secs(1)),
         open_folder_id: RefCell::new(None),
+        root_box: root_box.clone(),
         stack: stack.clone(),
         dots_box: dots_box.clone(),
         search_entry: search_entry.clone(),
@@ -404,15 +462,51 @@ pub fn build_ui(app: &Application) {
     }
 
     window.present();
+    if let Some(surface) = window.surface() {
+        let state_m = Rc::clone(&state);
+        surface.connect_enter_monitor(move |_, monitor| {
+            let geo = monitor.geometry();
+            let new_size = (geo.width(), geo.height());
+            if new_size.0 > 0 && new_size.1 > 0 && state_m.monitor_size.get() != new_size {
+                state_m.monitor_size.set(new_size);
+                sync_layout(&state_m);
+            }
+        });
+    }
+    sync_layout(&state);
     search_entry.grab_focus();
 }
 
-fn load_css(config: &Config) -> CssProvider {
+fn current_layout(state: &LauncherState) -> LayoutMetrics {
+    compute_layout_for(&state.config.borrow(), state.monitor_size.get())
+}
+
+fn sync_layout(state: &Rc<LauncherState>) {
+    let layout = current_layout(state);
+    let cfg = state.config.borrow();
+    apply_dynamic_css(&state.dynamic_css, &cfg, &layout);
+
+    let mt = (48.0 * layout.scale).round() as i32;
+    let mb = (36.0 * layout.scale).round() as i32;
+    let mx = (64.0 * layout.scale).round() as i32;
+    state.root_box.set_margin_top(mt.max(16));
+    state.root_box.set_margin_bottom(mb.max(14));
+    state.root_box.set_margin_start(mx.max(20));
+    state.root_box.set_margin_end(mx.max(20));
+    state
+        .root_box
+        .set_spacing((20.0 * layout.scale).round().max(10.0) as i32);
+
+    drop(cfg);
+    refresh_grid(state);
+}
+
+fn load_css(config: &Config, layout: &LayoutMetrics) -> CssProvider {
     let provider = CssProvider::new();
     provider.load_from_data(include_str!("style.css"));
 
     let dynamic = CssProvider::new();
-    apply_dynamic_css(&dynamic, config);
+    apply_dynamic_css(&dynamic, config, layout);
 
     if let Some(display) = gdk::Display::default() {
         gtk4::style_context_add_provider_for_display(
@@ -429,7 +523,10 @@ fn load_css(config: &Config) -> CssProvider {
     dynamic
 }
 
-fn apply_dynamic_css(dynamic: &CssProvider, config: &Config) {
+fn apply_dynamic_css(dynamic: &CssProvider, config: &Config, layout: &LayoutMetrics) {
+    let font_size = (13.0 * layout.scale).round().clamp(10.0, 18.0) as i32;
+    let search_w = (300.0 * layout.scale).round().clamp(220.0, 440.0) as i32;
+    let folder_pad = (8.0 * layout.scale).round().clamp(4.0, 12.0) as i32;
     let css = format!(
         "window.launchpad-window, window.launchpad-window.background {{ \
             background-color: rgba(12, 14, 20, {:.2}); \
@@ -437,8 +534,20 @@ fn apply_dynamic_css(dynamic: &CssProvider, config: &Config) {
          .folder-icon-box {{ \
             min-width: {}px; \
             min-height: {}px; \
+            padding: {}px; \
+         }} \
+         .app-label {{ \
+            font-size: {}px; \
+         }} \
+         .search-box {{ \
+            min-width: {}px; \
          }}",
-        config.background_opacity, config.icon_size, config.icon_size
+        config.background_opacity,
+        layout.icon_size,
+        layout.icon_size,
+        folder_pad,
+        font_size,
+        search_w
     );
     dynamic.load_from_data(&css);
 }
@@ -529,10 +638,9 @@ fn refresh_grid(state: &Rc<LauncherState>) {
         return;
     }
 
-    let (cols, apps_per_page, spacing, tile_size) = {
-        let cfg = state.config.borrow();
-        (cfg.columns, cfg.apps_per_page(), cfg.spacing, cfg.tile_size())
-    };
+    let layout = current_layout(state);
+    let (cols, apps_per_page, spacing, tile_size) =
+        (layout.cols, layout.apps_per_page, layout.spacing, layout.tile_size);
 
     let chunks: Vec<&[GridItem]> = items.chunks(apps_per_page).collect();
     let num_pages = chunks.len();
@@ -617,10 +725,8 @@ fn create_app_button(
         .valign(Align::Center)
         .build();
 
-    let (icon_size, tile_size) = {
-        let cfg = state.config.borrow();
-        (cfg.icon_size, cfg.tile_size())
-    };
+    let layout = current_layout(state);
+    let (icon_size, tile_size) = (layout.icon_size, layout.tile_size);
 
     let image = match &app_entry.icon {
         Some(gicon) => Image::from_gicon(gicon),
@@ -754,10 +860,8 @@ fn create_folder_button(state: &Rc<LauncherState>, folder: &Folder) -> Button {
         .build();
     icon_box.add_css_class("folder-icon-box");
 
-    let (mini_size, tile_size) = {
-        let cfg = state.config.borrow();
-        ((cfg.icon_size / 3).max(16), cfg.tile_size())
-    };
+    let layout = current_layout(state);
+    let (mini_size, tile_size) = ((layout.icon_size / 3).max(14), layout.tile_size);
 
     // Show up to 4 mini app icons in a 2x2 grid
     for (idx, app_id) in folder.app_ids.iter().take(4).enumerate() {
@@ -1264,10 +1368,13 @@ fn show_settings_popover(state: &Rc<LauncherState>, parent: &Button) {
         op_scale.connect_value_changed(move |s| {
             let val = (s.value() * 20.0).round() / 20.0;
             lbl.set_label(&format!("{}%", (val * 100.0).round() as i32));
-            let mut c = state_c.config.borrow_mut();
-            c.background_opacity = val;
-            apply_dynamic_css(&state_c.dynamic_css, &c);
-            c.save();
+            {
+                let mut c = state_c.config.borrow_mut();
+                c.background_opacity = val;
+                c.save();
+            }
+            let layout = current_layout(&state_c);
+            apply_dynamic_css(&state_c.dynamic_css, &state_c.config.borrow(), &layout);
         });
     }
     root.append(&op_row);
@@ -1290,10 +1397,9 @@ fn show_settings_popover(state: &Rc<LauncherState>, parent: &Button) {
             {
                 let mut c = state_c.config.borrow_mut();
                 c.icon_size = val;
-                apply_dynamic_css(&state_c.dynamic_css, &c);
                 c.save();
             }
-            refresh_grid(&state_c);
+            sync_layout(&state_c);
         });
     }
     root.append(&icon_row);
@@ -1318,7 +1424,7 @@ fn show_settings_popover(state: &Rc<LauncherState>, parent: &Button) {
                 c.columns = val;
                 c.save();
             }
-            refresh_grid(&state_c);
+            sync_layout(&state_c);
         });
     }
     root.append(&cols_row);
@@ -1343,7 +1449,7 @@ fn show_settings_popover(state: &Rc<LauncherState>, parent: &Button) {
                 c.rows = val;
                 c.save();
             }
-            refresh_grid(&state_c);
+            sync_layout(&state_c);
         });
     }
     root.append(&rows_row);
@@ -1368,17 +1474,51 @@ fn show_settings_popover(state: &Rc<LauncherState>, parent: &Button) {
                 c.spacing = val;
                 c.save();
             }
-            refresh_grid(&state_c);
+            sync_layout(&state_c);
         });
     }
     root.append(&sp_row);
 
-    // 6. Auto Steam folder switch
-    let steam_row = GtkBox::builder()
+    // 6. Auto screen scaling switch
+    let scale_row = GtkBox::builder()
         .orientation(Orientation::Horizontal)
         .spacing(12)
         .hexpand(true)
         .margin_top(4)
+        .margin_bottom(2)
+        .build();
+    let scale_lbl = Label::builder()
+        .label(state.strings.auto_scale)
+        .halign(Align::Start)
+        .hexpand(true)
+        .build();
+    scale_lbl.add_css_class("settings-label");
+    let scale_switch = Switch::builder()
+        .active(cfg.auto_scale)
+        .valign(Align::Center)
+        .build();
+    {
+        let state_c = Rc::clone(state);
+        scale_switch.connect_state_set(move |_, active| {
+            {
+                let mut c = state_c.config.borrow_mut();
+                c.auto_scale = active;
+                c.save();
+            }
+            sync_layout(&state_c);
+            glib::Propagation::Proceed
+        });
+    }
+    scale_row.append(&scale_lbl);
+    scale_row.append(&scale_switch);
+    root.append(&scale_row);
+
+    // 7. Auto Steam folder switch
+    let steam_row = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(12)
+        .hexpand(true)
+        .margin_top(2)
         .margin_bottom(4)
         .build();
     let steam_lbl = Label::builder()
@@ -1428,13 +1568,13 @@ fn show_settings_popover(state: &Rc<LauncherState>, parent: &Button) {
         let co_s = cols_scale.clone();
         let ro_s = rows_scale.clone();
         let sp_s = sp_scale.clone();
+        let sc_sw = scale_switch.clone();
         let st_sw = steam_switch.clone();
         reset_btn.connect_clicked(move |_| {
             let def = Config::default();
             {
                 let mut c = state_c.config.borrow_mut();
                 *c = def.clone();
-                apply_dynamic_css(&state_c.dynamic_css, &c);
                 c.save();
             }
             op_s.set_value(def.background_opacity);
@@ -1442,8 +1582,9 @@ fn show_settings_popover(state: &Rc<LauncherState>, parent: &Button) {
             co_s.set_value(def.columns as f64);
             ro_s.set_value(def.rows as f64);
             sp_s.set_value(def.spacing as f64);
+            sc_sw.set_active(def.auto_scale);
             st_sw.set_active(def.auto_steam_folder);
-            refresh_grid(&state_c);
+            sync_layout(&state_c);
         });
     }
     root.append(&reset_btn);

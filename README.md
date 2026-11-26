@@ -77,6 +77,7 @@ icon_size = 72
 spacing = 16
 background_opacity = 0.25
 auto_steam_folder = false
+auto_scale = true
 ```
 
 ## Controls

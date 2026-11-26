@@ -9,6 +9,7 @@ pub struct Config {
     pub spacing: i32,
     pub background_opacity: f64,
     pub auto_steam_folder: bool,
+    pub auto_scale: bool,
 }
 
 impl Default for Config {
@@ -20,6 +21,7 @@ impl Default for Config {
             spacing: 16,
             background_opacity: 0.25,
             auto_steam_folder: false,
+            auto_scale: true,
         }
     }
 }
@@ -32,10 +34,6 @@ impl Config {
                 std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config"))
             })?;
         Some(base.join("hyperpad").join("config.conf"))
-    }
-
-    pub fn tile_size(&self) -> i32 {
-        self.icon_size + 54
     }
 
     pub fn apps_per_page(&self) -> usize {
@@ -95,6 +93,11 @@ impl Config {
                         cfg.auto_steam_folder = v;
                     }
                 }
+                "auto_scale" => {
+                    if let Ok(v) = val.parse::<bool>() {
+                        cfg.auto_scale = v;
+                    }
+                }
                 _ => {}
             }
         }
@@ -116,13 +119,15 @@ impl Config {
              icon_size = {}\n\
              spacing = {}\n\
              background_opacity = {:.2}\n\
-             auto_steam_folder = {}\n",
+             auto_steam_folder = {}\n\
+             auto_scale = {}\n",
             self.columns,
             self.rows,
             self.icon_size,
             self.spacing,
             self.background_opacity,
-            self.auto_steam_folder
+            self.auto_steam_folder,
+            self.auto_scale
         );
         let _ = fs::write(&path, content);
     }

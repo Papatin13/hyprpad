@@ -39,6 +39,7 @@ pub struct Strings {
     pub reset_defaults: &'static str,
     pub config_hint: &'static str,
     pub auto_steam_folder: &'static str,
+    pub auto_scale: &'static str,
     lang: Lang,
 }
 
@@ -63,6 +64,7 @@ impl Strings {
                 reset_defaults: "Standard wiederherstellen",
                 config_hint: "Konfig: ~/.config/hyperpad/config.conf",
                 auto_steam_folder: "Steam-Spiele in Ordner sammeln",
+                auto_scale: "Automatische Skalierung",
                 lang: Lang::De,
             },
             Lang::En => Self {
@@ -83,6 +85,7 @@ impl Strings {
                 reset_defaults: "Reset to defaults",
                 config_hint: "Config: ~/.config/hyperpad/config.conf",
                 auto_steam_folder: "Group Steam games in folder",
+                auto_scale: "Auto screen scaling",
                 lang: Lang::En,
             },
         }
